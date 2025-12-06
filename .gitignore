@@ -1,0 +1,47 @@
+# Virtual environment
+clima/
+
+# Environment variables / secrets
+.env
+.env.*
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / build
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Streamlit
+.streamlit/
+
+# Editor / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints
+
+# Logs
+*.log
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+
+# pytest
+.pytest_cache/
+
+# Optional: lock files / local config
+# poetry.lock
+# Pipfile.lock
+
+# Keep node_modules out if you add frontend code
+node_modules/

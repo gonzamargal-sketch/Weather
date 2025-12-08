@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import requests
 import streamlit as st
 from datetime import datetime
+import math
 from babel import Locale
 
 load_dotenv()
@@ -17,6 +18,23 @@ def get_country_name(code: str) -> str:
         return _locale_es.territories.get(code.upper(), code)
     except Exception:
         return code
+
+
+def deg_to_arrow(deg):
+    """Convierte grados en una flecha y una etiqueta de dirección (8 puntos).
+    Devuelve tupla (arrow, compass_label, deg) donde deg puede ser '—' si no disponible.
+    """
+    try:
+        if deg is None:
+            return ('', '—', '—')
+        d = float(deg) % 360
+    except Exception:
+        return ('', '—', '—')
+
+    arrows = ['⬆️', '↗️', '➡️', '↘️', '⬇️', '↙️', '⬅️', '↖️']
+    labels = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO']
+    idx = int(((d + 22.5) % 360) // 45)
+    return (arrows[idx], labels[idx], round(d, 0))
 
 def obtener_coordenadas(nombre):
     url = f'http://api.openweathermap.org/geo/1.0/direct'
@@ -74,31 +92,103 @@ def obtener_clima_hoy(lat:float, lon:float):
         return {'error': True, 'mensaje': error_message}
 
 
-def obtener_prevision_7dias(lat: float, lon: float):
-    """Devuelve la respuesta JSON de la API One Call (previsión diaria).
-    Usa 'exclude' para omitir datos innecesarios y 'lang=es' para descripciones en español.
-    """
-    url = 'https://api.openweathermap.org/data/2.5/onecall'
-    params = {
-        'lat': lat,
-        'lon': lon,
-        'appid': API_KEY,
-        'units': 'metric',
-        'lang': 'es',
-        'exclude': 'minutely,hourly,alerts'
-    }
+def obtener_prevision_5dias(lat: float, lon: float):
+    """Devuelve previsión diaria usando /forecast (3h) del free plan."""
+    url = 'https://api.openweathermap.org/data/2.5/forecast'
+    params = {'lat': lat, 'lon': lon, 'appid': API_KEY, 'units': 'metric', 'lang': 'es'}
     try:
         resp = requests.get(url, params=params, timeout=10)
+        if resp.status_code != 200:
+            return {'error': True, 'mensaje': 'No se puede obtener previsión'}
     except Exception as e:
         return {'error': True, 'mensaje': str(e)}
 
-    if resp.status_code == 200:
-        return resp.json()
-    else:
-        try:
-            return {'error': True, 'mensaje': resp.json()}
-        except Exception:
-            return {'error': True, 'mensaje': resp.text}
+    try:
+        forecast3h = resp.json()
+        daily = _resumen_diario_desde_forecast3h(forecast3h, max_days=5)
+        return {
+            'daily': daily,
+            'timezone_offset': forecast3h.get('city', {}).get('timezone', 0)
+        }
+    except Exception as e:
+        return {'error': True, 'mensaje': str(e)}
+
+
+def _resumen_diario_desde_forecast3h(forecast_json, max_days=5):
+    """Agrupa forecast 3h en resumen diario compatible con la UI."""
+    from collections import defaultdict, Counter
+
+    if not forecast_json or 'list' not in forecast_json:
+        return []
+
+    tz_offset = forecast_json.get('city', {}).get('timezone', 0)
+    dias = defaultdict(list)
+
+    for item in forecast_json['list']:
+        ts_local = item['dt'] + tz_offset
+        date_str = datetime.utcfromtimestamp(ts_local).date().isoformat()
+        dias[date_str].append(item)
+
+    resumen = []
+    for date_str, items in sorted(dias.items())[:max_days]:
+        temps = [it['main']['temp'] for it in items if 'main' in it]
+        mins = [it['main'].get('temp_min') for it in items if 'main' in it]
+        maxs = [it['main'].get('temp_max') for it in items if 'main' in it]
+        pops = [it.get('pop', 0) for it in items]
+
+        # Descripción representativa (mediodía si existe)
+        descr = None
+        icon = None
+        for it in items:
+            hour = datetime.utcfromtimestamp(it['dt'] + tz_offset).hour
+            if 11 <= hour <= 13 and it.get('weather'):
+                descr = it['weather'][0].get('description')
+                icon = it['weather'][0].get('icon')
+                break
+        if not descr:
+            descrs = [it.get('weather', [{}])[0].get('description', '') for it in items]
+            common = Counter(descrs).most_common(1)
+            descr = common[0][0] if common else '—'
+            icon = items[len(items)//2].get('weather', [{}])[0].get('icon') if items else None
+
+        total_precip = 0.0
+        winds = [it.get('wind', {}).get('speed', 0) for it in items if 'wind' in it]
+        wind_dirs = [it.get('wind', {}).get('deg') for it in items if 'wind' in it and it.get('wind', {}).get('deg') is not None]
+        for it in items:
+            if 'rain' in it:
+                total_precip += it['rain'].get('3h', 0)
+            if 'snow' in it:
+                total_precip += it['snow'].get('3h', 0)
+
+        dt_ts = items[0]['dt'] if items else 0
+        # calcular media circular de la dirección del viento si hay datos
+        avg_wind_deg = '—'
+        if wind_dirs:
+            sin_sum = sum(math.sin(math.radians(d)) for d in wind_dirs)
+            cos_sum = sum(math.cos(math.radians(d)) for d in wind_dirs)
+            if sin_sum == 0 and cos_sum == 0:
+                avg_wind_deg = '—'
+            else:
+                mean_rad = math.atan2(sin_sum, cos_sum)
+                deg = math.degrees(mean_rad) % 360
+                avg_wind_deg = round(deg, 0)
+
+        resumen.append({
+            'dt': dt_ts,
+            'temp': {
+                'day': round(sum(temps)/len(temps), 1) if temps else '—',
+                'min': round(min(mins), 1) if mins else '—',
+                'max': round(max(maxs), 1) if maxs else '—'
+            },
+            'pop': max(pops) if pops else 0,
+            'wind': {
+                'speed': round(sum(winds)/len(winds), 1) if winds else '—',
+                'deg': avg_wind_deg
+            },
+            'weather': [{'description': (descr or '—'), 'icon': icon}]
+        })
+
+    return resumen
 
 
 def _format_basic(data):
@@ -117,9 +207,9 @@ def _format_basic(data):
 
 
 def main():
-    st.set_page_config(page_title='Dashboard Clima', layout='centered')
-    st.title('Dashboard Clima')
-    st.write('Busca el clima por ciudad usando OpenWeatherMap')
+    st.set_page_config(page_title='Dashboard Clima', layout='wide')
+    st.markdown("<h1 style='text-align:center; margin-bottom:0.25rem'>Dashboard Clima</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:gray'>Busca el clima por ciudad usando OpenWeatherMap</p>", unsafe_allow_html=True)
 
     # Input + submit dentro de un formulario: Enter actúa como enviar
     with st.form(key='search_form'):
@@ -176,7 +266,7 @@ def mostrar_clima(data: dict, ejemplo_mode: bool = False, ciudad_display: str = 
             break
 
     # Top row: title + icon
-    col1, col2 = st.columns([3,1])
+    col1, col2 = st.columns([4,1])
     with col1:
         st.subheader(f" {emoji} Clima en {ciudad_nombre}")
         st.write(f'Coordenadas: {lat:.4f}, {lon:.4f}')
@@ -235,8 +325,14 @@ def mostrar_clima(data: dict, ejemplo_mode: bool = False, ciudad_display: str = 
             st.subheader('📊 Otros datos')
             st.write(f"**Visibilidad:** {data.get('visibility', '—')} m")
             st.write(f"**Nubosidad:** {data.get('clouds', {}).get('all', '—')}%")
-            st.write(f"**Velocidad viento:** {data.get('wind', {}).get('speed', '—')} m/s")
-            st.write(f"**Dirección viento:** {data.get('wind', {}).get('deg', '—')}°")
+            # Mostrar viento con flecha y etiqueta si hay dirección
+            wind_speed = data.get('wind', {}).get('speed', '—')
+            wind_deg = data.get('wind', {}).get('deg')
+            arrow, label, deg_val = deg_to_arrow(wind_deg)
+            if deg_val == '—':
+                st.write(f"**Viento:** {wind_speed} m/s")
+            else:
+                st.write(f"**Viento:** {wind_speed} m/s {arrow} {int(deg_val)}° ({label})")
             if data.get('rain'):
                 st.write(f"**Lluvia (1h):** {data.get('rain', {}).get('1h', '—')} mm")
             if data.get('snow'):
@@ -244,16 +340,16 @@ def mostrar_clima(data: dict, ejemplo_mode: bool = False, ciudad_display: str = 
             # Mostrar la descripción localizada (campo 'description') solicitada con 'lang=es'
             desc_loc = data.get('weather', [{}])[0].get('description', '—')
             st.write(f"**Descripción:** {desc_loc.capitalize()}")
-'''
+
     # Previsión 7 días (extra)
-    with st.expander('📅 Previsión 7 días'):
+    with st.expander('📅 Previsión 5 días'):
         coord = data.get('coord') or {}
         lat = coord.get('lat')
         lon = coord.get('lon')
         if not (lat and lon):
             st.info('No hay coordenadas disponibles para esta ciudad.')
         else:
-            prevision = obtener_prevision_7dias(lat, lon)
+            prevision = obtener_prevision_5dias(lat, lon)
             if isinstance(prevision, dict) and prevision.get('error'):
                 st.error(f"No se pudo obtener la previsión: {prevision.get('mensaje')}")
             else:
@@ -282,6 +378,13 @@ def mostrar_clima(data: dict, ejemplo_mode: bool = False, ciudad_display: str = 
                             st.write(f"{desc}")
                             st.write(f"{t_day}°C (min {t_min} / max {t_max})")
                             st.write(f"Prob. precipitación: {pop}%")
-'''
+                            wind_speed = day.get('wind', {}).get('speed', '—')
+                            wind_deg = day.get('wind', {}).get('deg')
+                            arrow, label, deg_val = deg_to_arrow(wind_deg)
+                            if deg_val == '—':
+                                st.write(f"Viento: {wind_speed} m/s")
+                            else:
+                                st.write(f"Viento: {wind_speed} m/s {arrow} {int(deg_val)}° ({label})")
+
 if __name__ == '__main__':
     main()

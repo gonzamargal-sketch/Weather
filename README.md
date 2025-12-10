@@ -68,6 +68,30 @@ Streamlit abrirá automáticamente el navegador en `http://localhost:8501`.
    - Panel expandible "Info completa" con datos detallados (país, coordenadas, presión, etc.)
 3. **Previsión**: Abre el expander "Previsión 7 días" para ver pronósticos diarios (si tu clave API lo permite).
 
+### Bot de Telegram (simple)
+
+Existe un bot básico por polling incluido en `telegram_bot.py` que responde con el clima actual cuando le envías el nombre de una ciudad. Es una forma rápida de consultar el clima desde Telegram sin configurar webhooks ni administración adicional.
+
+Pasos rápidos para usar el bot:
+
+- Añade las variables al archivo `.env` en la raíz del proyecto:
+   ```text
+   BOT_TOKEN=tu_token_de_bot_de_telegram
+   API_KEY=tu_api_key_de_openweathermap
+   ```
+- Activa el entorno virtual e instala dependencias (si no lo has hecho):
+   ```powershell
+   .\clima\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   ```
+- Ejecuta el bot (usa polling, verás mensajes en consola):
+   ```powershell
+   python telegram_bot.py
+   ```
+- En Telegram, abre tu bot (por el username que creaste con BotFather) y envía `/start` para ver las instrucciones.
+- Envía el nombre de una ciudad (ej: `Madrid`, `clima Barcelona`, `tiempo en Sevilla`) y el bot responderá con el clima actual: descripción, temperatura, sensación térmica, humedad y viento (incluye flecha y etiqueta de dirección si el dato de grados está disponible).
+
+
 ## 🔧 Estructura del proyecto
 
 ```

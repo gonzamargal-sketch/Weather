@@ -101,6 +101,7 @@ dashboard_clima/
 ├── requirements.txt       # Dependencias Python
 ├── .env                   # Variables de entorno (NO subir a GitHub)
 ├── .gitignore             # Archivos a ignorar en Git
+├── telegram_bot.py        # Código con el que se activa el bot
 └── clima/                 # Entorno virtual (NO subir a GitHub)
 ```
 
